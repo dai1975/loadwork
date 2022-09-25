@@ -36,8 +36,20 @@ pub fn work_name() -> Result<String> {
 pub fn work_version() -> Result<String> {
     parse_env!("WORK_VERSION")
 }
-pub fn mongodb_uri() -> Result<String> {
-    parse_env!("MONGODB_URI")
+pub fn mongodb_username() -> Result<String> {
+    parse_env!("MONGODB_USERNAME")
+}
+pub fn mongodb_password() -> Result<String> {
+    parse_env!("MONGODB_PASSWORD")
+}
+pub fn mongodb_host() -> Result<String> {
+    parse_env!("MONGODB_HOST")
+}
+pub fn mongodb_port() -> String {
+    parse_env_opt!("MONGODB_PORT").unwrap_or("27017".to_string())
+}
+pub fn mongodb_options() -> String {
+    parse_env_opt!("MONGODB_OPTIONS").unwrap_or("".to_string())
 }
 pub fn mongodb_database() -> Result<String> {
     parse_env!("MONGODB_DATABASE")

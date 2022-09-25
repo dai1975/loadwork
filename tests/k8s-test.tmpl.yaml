@@ -1,0 +1,130 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loadwork-k8s-test
+  namespace: ${X_K8S_NS}
+data:
+  LW_MONGODB_HOST: "mongodb"
+  LW_MONGODB_PORT: "27017"
+  LW_MONGODB_USERNAME: "${LW_MONGODB_USERNAME}"
+  LW_MONGODB_PASSWORD: "${LW_MONGODB_PASSWORD}"
+  LW_MONGODB_OPTIONS: "${LW_MONGODB_OPTIONS}"
+  LW_MONGODB_DATABASE: "${LW_MONGODB_DATABASE}"
+  LW_MONGODB_COLLECTION: "test_k8s_coll"
+  LW_S3_ENDPOINT: "http://minio:9000"
+  LW_S3_ACCESS_KEY: "${LW_S3_ACCESS_KEY}"
+  LW_S3_SECRET_KEY: "${LW_S3_SECRET_KEY}"
+  LW_S3_BUCKET: "${LW_S3_BUCKET}"
+  LW_S3_PATH_STYLE: "true"
+  LW_TARGET_ID: "test-k8s"
+  LW_INDIR: "/work/indir"
+  LW_OUTDIR: "/work/outdir"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: loadwork-k8s-test
+  namespace: ${X_K8S_NS}
+spec:
+  parallelism: 1
+  completions: 1
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: loadwork
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: origin-container
+          emptyDir: {}
+        - name: depend-container
+          emptyDir: {}
+        - name: results-container
+          emptyDir: {}
+      initContainers:
+        - name: clear
+          image: localhost:32000/loadwork:latest
+          envFrom:
+            - configMapRef:
+                name: loadwork-k8s-test
+          command:
+            - sh
+            - -c
+            - |
+              mongosh --eval "db.${DOLLAR}LW_MONGODB_COLLECTION.deleteMany({\"id\":\"${DOLLAR}LW_TARGET_ID\"});" mongodb://${DOLLAR}LW_MONGODB_USERNAME:${DOLLAR}LW_MONGODB_PASSWORD@${DOLLAR}LW_MONGODB_HOST:${DOLLAR}LW_MONGODB_PORT/${DOLLAR}LW_MONGODB_DATABASE?${DOLLAR}LW_MONGODB_OPTIONS
+              export AWS_ACCESS_KEY_ID=${DOLLAR}LW_S3_ACCESS_KEY
+              export AWS_SECRET_ACCESS_KEY=${DOLLAR}LW_S3_SECRET_KEY
+              aws --endpoint ${DOLLAR}LW_S3_ENDPOINT s3 rm s3://${DOLLAR}LW_S3_BUCKET/${DOLLAR}LW_TARGET_ID/ --recursive
+        - name: origin
+          image: localhost:32000/loadwork:latest
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: origin-container
+              mountPath: /work
+          envFrom:
+            - configMapRef:
+                name: loadwork-k8s-test
+          env:
+            - name: LW_WORK_NAME
+              value: "origin"
+            - name: LW_WORK_VERSION
+              value: "any_string"
+          command:
+            - /loadwork-bullseye-release
+            - run
+            - sh
+            - -c
+            - |
+              env
+              date > ${DOLLAR}LW_OUTDIR/artifacts/date.txt
+              uname -a > ${DOLLAR}LW_OUTDIR/artifacts/uname.txt
+              echo '{"miku":"green"}' > ${DOLLAR}LW_OUTDIR/metadata.json
+        - name: depend
+          image: localhost:32000/loadwork:latest
+          volumeMounts:
+            - name: depend-container
+              mountPath: /work
+          envFrom:
+            - configMapRef:
+                name: loadwork-k8s-test
+          env:
+            - name: LW_WORK_NAME
+              value: "depend"
+            - name: LW_WORK_VERSION
+              value: "3_1415"
+            - name: LW_DEPENDS_origin_any_string
+              value: "date.txt;uname.txt"
+          command:
+            - /loadwork-bullseye-release
+            - run
+            - sh
+            - -c
+            - |
+              for f in ${DOLLAR}LW_INDIR/artifacts/origin/*; do
+                sha1sum ${DOLLAR}f > ${DOLLAR}LW_OUTDIR/artifacts/`basename ${DOLLAR}f`.sha1sum.txt
+              done
+              echo '{"rin":"orange"}' > ${DOLLAR}LW_OUTDIR/result.json
+      containers:
+        - name: results
+          image: localhost:32000/loadwork:latest
+          volumeMounts:
+            - name: results-container
+              mountPath: /work
+          envFrom:
+            - configMapRef:
+                name: loadwork-k8s-test
+          command:
+            - sh
+            - -c
+            - |
+              echo mongosh --eval "db.${DOLLAR}LW_MONGODB_COLLECTION.find({\"id\":\"${DOLLAR}LW_TARGET_ID\"});" mongodb://${DOLLAR}LW_MONGODB_USERNAME:${DOLLAR}LW_MONGODB_PASSWORD@${DOLLAR}LW_MONGODB_HOST:${DOLLAR}LW_MONGODB_PORT/${DOLLAR}LW_MONGODB_DATABASE?${DOLLAR}LW_MONGODB_OPTIONS
+              mongosh --eval "db.${DOLLAR}LW_MONGODB_COLLECTION.find({\"id\":\"${DOLLAR}LW_TARGET_ID\"});" mongodb://${DOLLAR}LW_MONGODB_USERNAME:${DOLLAR}LW_MONGODB_PASSWORD@${DOLLAR}LW_MONGODB_HOST:${DOLLAR}LW_MONGODB_PORT/${DOLLAR}LW_MONGODB_DATABASE?${DOLLAR}LW_MONGODB_OPTIONS
+              export AWS_ACCESS_KEY_ID=${DOLLAR}LW_S3_ACCESS_KEY
+              export AWS_SECRET_ACCESS_KEY=${DOLLAR}LW_S3_SECRET_KEY
+              echo aws --endpoint ${DOLLAR}LW_S3_ENDPOINT s3 sync s3://${DOLLAR}LW_S3_BUCKET/${DOLLAR}LW_TARGET_ID /work/
+              aws --endpoint ${DOLLAR}LW_S3_ENDPOINT s3 sync s3://${DOLLAR}LW_S3_BUCKET/${DOLLAR}LW_TARGET_ID /work/
+              for f in origin/date.txt origin/uname.txt depend/date.txt.sha1sum.txt depend/uname.txt.sha1sum.txt; do
+                echo "--- ${DOLLAR}f -----------"
+                cat /work/${DOLLAR}f
+              done

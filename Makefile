@@ -1,5 +1,7 @@
-VERSION=0.20220917
-NS=
+SHELL=/bin/bash
+VERSION=0.20220925
+TESTENV=.env.test
+CONTAINER_REGISTRY=192.168.39.2:32000
 
 build:
 	cargo build
@@ -8,42 +10,45 @@ image:
 	mkdir -p $$(pwd)/,container-cache && chmod 777 $$(pwd)/,container-cache
 	buildah bud --layers -f Dockerfile -v $$(pwd)/,container-cache:/target -t loadwork:$(VERSION) .
 	buildah tag loadwork:$(VERSION) loadwork:latest
-	buildah tag loadwork:latest microk8s:32000/loadwork:latest
-	buildah push microk8s:32000/loadwork:latest
+	buildah tag loadwork:latest $(CONTAINER_REGISTRY)/loadwork:latest
+	buildah push $(CONTAINER_REGISTRY)/loadwork:latest
 
 test:
-	$(MAKE) doctest
-	$(MAKE) test-cargo
+	$(MAKE) test-doc
 
-doctest:
+test-doc:
 	@RUST_BUCKTRACE=1 cargo test --doc -- --nocapture
 
-test-cargo:
-	NS=test-loadwork-cargo; \
-	@kubectl get ns $$NS >/dev/null 2>&1 || $(MAKE) test-k8s-setup NS=$$NS; \
-	. ../../test/env.sh; \
-	export LW_INDIR=/tmp/loadwork-test/in; \
-	export LW_OUTDIR=/tmp/loadwork-test/out; \
-	export LW_TARGET_ID=loadwork-test; \
-	export LW_WORK_NAME=cargo; \
+test-local:
+	@. .env.test; kubectl get ns $$X_K8S_NS >/dev/null 2>&1 || $(MAKE) test-k8s-setup
+	. .env.test; \
+	export LW_TARGET_ID=test-local; \
+	export LW_WORK_NAME=foobar; \
 	export LW_WORK_VERSION=1; \
-	rm -rf /tmp/loadwork-test; mkdir -p /tmp/loadwork-test; \
+	export LW_INDIR=/tmp/lw-${LW_TARGET_ID}-in; \
+	export LW_OUTDIR=/tmp/lw-${LW_TARGET_ID}-out; \
+	test -e $$LW_INDIR && rm -rf $$LW_INDIR; \
+	test -e $$LW_OUTDIR && rm -rf $$LW_OUTDIR; \
 	cargo test -- --nocapture
 
-test-k8s:
-	@kubectl get ns test-loadwork >/dev/null 2>&1 || $(MAKE) test-k8s-setup NS=test-loadwork
-	kubectl -n test-demucs wait pod --for=condition=ready --selector app=mongodb
-	kubectl -n test-loadwork delete -f ./test.yaml 2>/dev/null || true
-	kubectl -n test-loadwork apply -f ./test.yaml
-	kubectl -n test-loadwork wait jobs --for=condition=complete --selector app=loadwork
-	kubectl -n test-loadwork logs --selector app=loadwork -c results --tail=100
+test-k8s: tests/k8s-test.yaml
+	@. .env.test; kubectl get ns $$X_K8S_NS >/dev/null 2>&1 || $(MAKE) test-k8s-setup
+	. .env.test; kubectl -n $$X_K8S_NS delete -f $< 2>/dev/null || true
+	. .env.test; kubectl -n $$X_K8S_NS apply -f $<
+	. .env.test; kubectl -n $$X_K8S_NS wait jobs --for=condition=complete --selector app=loadwork
+	. .env.test; kubectl -n $$X_K8S_NS logs --selector app=loadwork -c results --tail=100
 
-test-k8s-setup:
-	$(MAKE) -C ../../test NS=$(NS) clean
-	$(MAKE) -C ../../test NS=$(NS) backend
+test-k8s-setup: tests/k8s-depends.yaml
+	kubectl apply -f $<
 
-test-k8s-clean:
-	$(MAKE) -C ../../test NS=$(NS) clean
+tests/k8s-depends.yaml: tests/k8s-depends.tmpl.yaml $(TESTENV)
+	. $(TESTENV) && envsubst < $< > $@
+
+tests/k8s-test.yaml: tests/k8s-test.tmpl.yaml $(TESTENV)
+	. $(TESTENV) && envsubst < $< > $@
+
+test-k8s-clean: $(TESTENV)
+	. $(TESTENV) && kubectl delete namespace $$X_K8S_NS
 
 clean:
 	find . -name "*~" -exec rm {} \;

@@ -353,11 +353,11 @@ mod tests {
             async_std::fs::create_dir(&outdir2).await?;
         }
 
-        let bucketname = "testbucket";
+        let bucketname = "test-artifact";
         let conn = ConnectorBuilder::new_from_env()?
             .bucket(bucketname)
             .build()?;
-        //println!("bucket.url = {}", conn.bucket()?.url());
+        println!("bucket.url = {}", conn.bucket()?.url());
         let bucket = conn.bucket()?;
         // at first try to delete bucket because to call list against empty bucket raise panic...
         let r = bucket.delete().await.unwrap_or(0u16);

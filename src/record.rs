@@ -47,28 +47,41 @@ fn db_key(target_id: &str) -> Document {
 
 #[derive(Debug, Clone)]
 pub struct Connector {
-    uri: String,
+    urlbase: String,
+    options: String,
     database: String,
     collection: String,
 }
 impl Connector {
     pub fn new_from_env() -> Result<Self> {
         use crate::envvar;
-        let uri = envvar::mongodb_uri()?;
+        let host = envvar::mongodb_host()?;
+        let port = envvar::mongodb_port();
+        let user = envvar::mongodb_username()?;
+        let pass = envvar::mongodb_password()?;
+        let urlbase = format!("mongodb://{}:{}@{}:{}", user, pass, host, port);
+        let options = envvar::mongodb_options();
         let database = envvar::mongodb_database()?;
         let collection = envvar::mongodb_collection()?;
-        //println!("mongodb: uri={}, db={}, coll={}", uri, database, collection);
-        Ok(Connector::new(uri, database, collection))
+        //println!("mongodb: urlbase={}, db={}, coll={}", urlbase, database, collection);
+        Ok(Connector::new(urlbase, options, database, collection))
     }
-    pub fn new(uri: String, database: String, collection: String) -> Self {
+    pub fn new(urlbase: String, options: String, database: String, collection: String) -> Self {
         Self {
-            uri: uri,
+            urlbase: urlbase,
+            options: options,
             database: database,
             collection: collection,
         }
     }
     pub async fn connect(&self) -> Result<Connect> {
-        Connect::new(&self.uri, &self.database, &self.collection).await
+        Connect::new(
+            &self.urlbase,
+            &self.options,
+            &self.database,
+            &self.collection,
+        )
+        .await
     }
 }
 
@@ -82,11 +95,17 @@ impl Connect {
         let c = Connector::new_from_env()?;
         c.connect().await
     }
-    pub async fn new(uri: &str, database: &str, collection: &str) -> Result<Self> {
-        let uri = format!("{}/{}", uri, database);
-        let mongodb_client = mongodb::Client::with_uri_str(&uri)
+    pub async fn new(
+        urlbase: &str,
+        options: &str,
+        database: &str,
+        collection: &str,
+    ) -> Result<Self> {
+        let url = format!("{}/{}?{}", urlbase, database, options);
+        //println!("mongodb: connectiong to '{}'", url);
+        let mongodb_client = mongodb::Client::with_uri_str(&url)
             .await
-            .known_error(&format!("fail to connect: {}", uri.to_string()), true)?;
+            .known_error(&format!("fail to connect: {}", url.to_string()), true)?;
         let mongodb_coll = mongodb_client.database(database).collection(collection);
         Ok(Self { coll: mongodb_coll })
     }

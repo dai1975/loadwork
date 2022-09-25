@@ -19,3 +19,6 @@ Cargo.lock
 # temporary filenames for me
 ,*
 *-
+
+tests/k8s-depends.yaml
+tests/k8s-test.yaml
